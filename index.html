@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="si">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Class Stream</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* Offline Animated Screen */
+        .offline-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            text-align: center;
+            z-index: 1;
+            position: absolute;
+        }
+
+        .pulse-ring {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: rgba(56, 189, 248, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+            animation: pulse 1.8s infinite cubic-bezier(0.66, 0, 0, 1);
+        }
+
+        .pulse-dot {
+            width: 20px;
+            height: 20px;
+            background-color: #38bdf8;
+            border-radius: 50%;
+            box-shadow: 0 0 15px #38bdf8;
+        }
+
+        @keyframes pulse {
+            to { box-shadow: 0 0 0 40px rgba(56, 189, 248, 0); }
+        }
+
+        .offline-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #f1f5f9;
+        }
+
+        .offline-subtitle {
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        /* Pure Fullscreen Video Player */
+        video {
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain;
+            background: #000;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 2;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="offline-container" id="offlineUI">
+        <div class="pulse-ring">
+            <div class="pulse-dot"></div>
+        </div>
+        <div class="offline-title">Waiting for Live Class...</div>
+        <div class="offline-subtitle">The video will start automatically when host shares screen.</div>
+    </div>
+
+    <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
+
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script>
+        const peer = new Peer();
+        const hostId = 'my-secret-zoom-room-stream';
+        let isConnected = false;
+
+        peer.on('open', () => {
+            connectToHost();
+        });
+
+        function connectToHost() {
+            if (isConnected) return;
+
+            const call = peer.call(hostId, null);
+
+            call.on('stream', remoteStream => {
+                isConnected = true;
+                const videoEl = document.getElementById('remoteVideo');
+                document.getElementById('offlineUI').style.display = 'none';
+                videoEl.style.display = 'block';
+                videoEl.srcObject = remoteStream;
+
+                // Handle Browser Autoplay Restriction
+                videoEl.play().catch(() => {
+                    console.log('Autoplay blocked. Waiting for click.');
+                });
+            });
+
+            call.on('close', () => {
+                resetToOffline();
+            });
+
+            call.on('error', () => {
+                resetToOffline();
+            });
+        }
+
+        function resetToOffline() {
+            isConnected = false;
+            document.getElementById('remoteVideo').style.display = 'none';
+            document.getElementById('offlineUI').style.display = 'flex';
+            setTimeout(connectToHost, 3000); // Re-try connection
+        }
+
+        // Auto retry connecting every 4 seconds if not connected
+        setInterval(() => {
+            if (!isConnected && peer.open) {
+                connectToHost();
+            }
+        }, 4000);
+
+        // Allow sound activation on user interaction if browser blocks autoplay
+        document.body.addEventListener('click', () => {
+            const videoEl = document.getElementById('remoteVideo');
+            if (videoEl.srcObject) {
+                videoEl.play();
+            }
+        });
+    </script>
+</body>
+</html>
