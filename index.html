@@ -6,95 +6,56 @@
     <title>Stream Admin Panel</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: #0f172a;
-            color: #f8fafc;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-        }
-        .admin-card {
-            background: #1e293b;
-            padding: 35px;
-            border-radius: 16px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            max-width: 480px;
-            width: 90%;
-            text-align: center;
-            border: 1px solid #334155;
-        }
-        h2 { font-size: 22px; margin-bottom: 12px; color: #38bdf8; }
-        p { color: #94a3b8; font-size: 14px; margin-bottom: 25px; line-height: 1.6; }
-        .btn-share {
-            background: #0284c7;
-            color: #fff;
-            border: none;
-            padding: 14px 24px;
-            font-size: 16px;
-            font-weight: 600;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: 0.2s;
-            width: 100%;
-        }
-        .btn-share:hover { background: #0369a1; }
-        .status-badge {
-            margin-top: 20px;
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 600;
-            background: #334155;
-            color: #f59e0b;
-        }
-        .active { background: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #fff; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .card { background: #1e293b; padding: 35px; border-radius: 16px; width: 90%; max-width: 450px; text-align: center; border: 1px solid #334155; }
+        h2 { color: #38bdf8; margin-bottom: 10px; }
+        p { color: #94a3b8; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+        button { background: #0284c7; color: white; border: none; padding: 14px; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; width: 100%; transition: 0.2s; }
+        button:hover { background: #0369a1; }
+        #status { margin-top: 20px; font-size: 14px; font-weight: bold; color: #f59e0b; padding: 10px; border-radius: 6px; background: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
 
-    <div class="admin-card">
-        <h2>Live Class - Admin Control</h2>
-        <p>Zoom Window එක Screen Share කිරීමට පහත Button එක ක්ලික් කරන්න. <b>"Share system audio"</b> ටික් එක On කිරීමට අමතක නොකරන්න.</p>
-        
-        <button class="btn-share" onclick="startBroadcasting()">Start Sharing Zoom</button>
-        
-        <div class="status-badge" id="statusBox">Status: Offline (Not Sharing)</div>
+    <div class="card">
+        <h2>Live Class Admin Control</h2>
+        <p>Zoom Window එක Select කර <b>"Share system audio"</b> ඔප්ෂන් එක අනිවාර්යයෙන්ම ටික් කරන්න.</p>
+        <button onclick="startBroadcasting()">Start Sharing Zoom</button>
+        <div id="status">Status: Offline</div>
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script>
-        let peer;
-        let localStream;
+        let peer = null;
+        let localStream = null;
 
         function startBroadcasting() {
             navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }).then(stream => {
                 localStream = stream;
                 
-                const statusBox = document.getElementById('statusBox');
-                statusBox.innerText = 'Status: Live Broadcasting Active!';
-                statusBox.classList.add('active');
+                const status = document.getElementById('status');
+                status.innerText = 'Status: Live Stream Active!';
+                status.style.color = '#22c55e';
 
-                // Host එක සඳහා භාවිත වන නිශ්චිත ID එක
-                peer = new Peer('my-zoom-class-master-stream');
+                // Static Peer ID for learnmax08
+                peer = new Peer('learnmax08-zoom-master-stream-v1');
 
                 peer.on('open', id => {
-                    console.log('Broadcaster Peer ID:', id);
+                    console.log('Host Ready:', id);
                 });
 
                 peer.on('call', call => {
-                    call.answer(localStream); // බලන්න එන පාරිභෝගිකයින්ට Stream එක ලබාදීම
+                    call.answer(localStream);
                 });
 
-                // User Screen Share එක නතර කළ විට
                 stream.getVideoTracks()[0].onended = () => {
-                    statusBox.innerText = 'Status: Stream Stopped';
-                    statusBox.classList.remove('active');
+                    status.innerText = 'Status: Stream Stopped';
+                    status.style.color = '#ef4444';
+                    if (peer) peer.destroy();
                 };
 
             }).catch(err => {
-                alert('Screen Share Canceled or Failed: ' + err.message);
+                alert('Screen Share Error: ' + err.message);
             });
         }
     </script>
