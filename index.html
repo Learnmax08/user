@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram + WhatsApp Ultimate Web Chat</title>
+    <title>Super Chat Hub - Custom Alerts & Last Seen</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -12,10 +12,10 @@
             theme: {
                 extend: {
                     colors: {
-                        waDark: '#0f172a',
-                        waPanel: '#1e293b',
+                        waDark: '#0b0f19',
+                        waPanel: '#111827',
                         waGreen: '#2563eb',
-                        waChatBg: '#090d16',
+                        waChatBg: '#030712',
                     }
                 }
             }
@@ -28,7 +28,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, doc, updateDoc, deleteDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, doc, updateDoc, deleteDoc, getDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDS8V5xE31W8CsrvGXRE-g_93yadXtPbh0",
@@ -47,11 +47,14 @@
         const provider = new GoogleAuthProvider();
 
         let currentUser = null;
-        let activeChat = { id: null, name: null, type: null };
+        let activeChat = { id: null, name: null, type: null, data: null };
         let replyingTo = null;
         let mediaRecorder = null;
         let audioChunks = [];
+        let unsubUserStatus = null; // Last seen listener
 
+        let notifVolume = 0.5;
+        let notifEnabled = true;
         const notifSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
 
         window.loginWithGoogle = function() {
@@ -66,6 +69,11 @@
                     isOnline: true,
                     lastSeen: serverTimestamp()
                 }, { merge: true });
+
+                // Set offline on window close/unload
+                window.addEventListener('beforeunload', async () => {
+                    await setDoc(doc(db, "users", user.uid), { isOnline: false, lastSeen: serverTimestamp() }, { merge: true });
+                });
             })
             .catch((error) => alert("Login Error: " + error.message));
         };
@@ -88,6 +96,9 @@
                 document.getElementById('current-username').innerText = user.displayName;
                 if(user.photoURL) document.getElementById('nav-profile-img').src = user.photoURL;
 
+                // Keep online status active
+                setDoc(doc(db, "users", user.uid), { isOnline: true, lastSeen: serverTimestamp() }, { merge: true });
+
                 loadEverything();
             } else {
                 loginScreen.style.display = 'flex';
@@ -101,13 +112,12 @@
             loadChannels();
         }
 
-        // Tab Switching Logic
         window.switchTab = function(tabName) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('text-[var(--theme-color)]', 'border-b-2', 'border-[var(--theme-color)]'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('text-[var(--theme-color)]', 'border-b-2', 'border-[var(--theme-color)]', 'bg-slate-800/40'));
             
             document.getElementById(`tab-${tabName}`).classList.remove('hidden');
-            document.getElementById(`btn-${tabName}`).classList.add('text-[var(--theme-color)]', 'border-b-2', 'border-[var(--theme-color)]');
+            document.getElementById(`btn-${tabName}`).classList.add('text-[var(--theme-color)]', 'border-b-2', 'border-[var(--theme-color)]', 'bg-slate-800/40');
         }
 
         function loadUsers() {
@@ -117,16 +127,18 @@
                 snapshot.forEach((docSnap) => {
                     const u = docSnap.data();
                     if(currentUser && u.email === currentUser.email) return;
-                    let statusColor = u.isOnline ? 'bg-green-500' : 'bg-gray-500';
+                    let statusColor = u.isOnline ? 'bg-emerald-500' : 'bg-slate-500';
+                    let statusText = u.isOnline ? 'Active now' : 'Offline';
+                    
                     html += `
-                        <div onclick="selectChat('${u.uid}', '${u.name}', '${u.photoURL || ''}', 'user')" class="flex items-center px-4 py-3 hover:bg-slate-800/60 cursor-pointer border-b border-slate-800/40 transition rounded-xl mx-2 my-1">
-                            <div class="relative mr-3">
-                                <img src="${u.photoURL || 'https://via.placeholder.com/150'}" class="rounded-full w-12 h-12 object-cover border-2 border-[var(--theme-color)]">
-                                <span class="absolute bottom-0 right-0 w-3 h-3 ${statusColor} border-2 border-slate-900 rounded-full"></span>
+                        <div onclick="selectChat('${u.uid}', '${u.name}', '${u.photoURL || ''}', 'user')" class="group flex items-center px-4 py-3 hover:bg-slate-800/60 cursor-pointer transition rounded-2xl mx-2 my-1 border border-transparent hover:border-slate-700/50">
+                            <div class="relative mr-3.5">
+                                <img src="${u.photoURL || 'https://via.placeholder.com/150'}" class="rounded-2xl w-12 h-12 object-cover border-2 border-[var(--theme-color)]/30 group-hover:border-[var(--theme-color)] transition shadow-md">
+                                <span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 ${statusColor} border-2 border-slate-900 rounded-full"></span>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <h2 class="font-semibold truncate text-white text-sm">${u.name}</h2>
-                                <p class="text-xs text-slate-400">${u.isOnline ? 'Online' : 'Offline'}</p>
+                                <h2 class="font-bold truncate text-white text-sm">${u.name}</h2>
+                                <p class="text-xs text-slate-400 font-medium">${statusText}</p>
                             </div>
                         </div>
                     `;
@@ -141,14 +153,18 @@
                 let html = '';
                 snapshot.forEach((docSnap) => {
                     const g = docSnap.data();
+                    const members = g.members || [];
+                    const isAdmin = g.createdBy === currentUser.uid;
+                    if(!isAdmin && !members.includes(currentUser.uid)) return;
+
                     html += `
-                        <div onclick="selectChat('${g.id}', '${g.name}', 'https://cdn-icons-png.flaticon.com/512/166/166258.png', 'group')" class="flex items-center px-4 py-3 hover:bg-slate-800/60 cursor-pointer border-b border-slate-800/40 transition rounded-xl mx-2 my-1">
-                            <div class="bg-[var(--theme-color)] text-white font-bold rounded-full w-12 h-12 flex items-center justify-center mr-3 text-lg shadow-lg">
+                        <div onclick='selectGroupChat(${JSON.stringify(g)})' class="group flex items-center px-4 py-3 hover:bg-slate-800/60 cursor-pointer transition rounded-2xl mx-2 my-1 border border-transparent hover:border-slate-700/50">
+                            <div class="bg-gradient-to-tr from-[var(--theme-color)] to-blue-400 text-white font-bold rounded-2xl w-12 h-12 flex items-center justify-center mr-3.5 text-lg shadow-lg">
                                 <i class="fa-solid fa-users"></i>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <h2 class="font-semibold truncate text-white text-sm">${g.name}</h2>
-                                <p class="text-xs text-slate-400">Study Group Chat</p>
+                                <h2 class="font-bold truncate text-white text-sm">${g.name}</h2>
+                                <p class="text-xs text-slate-400 font-medium">${isAdmin ? 'You are Admin' : 'Member'}</p>
                             </div>
                         </div>
                     `;
@@ -164,13 +180,13 @@
                 snapshot.forEach((docSnap) => {
                     const c = docSnap.data();
                     html += `
-                        <div onclick="selectChat('${c.id}', '${c.name}', 'https://cdn-icons-png.flaticon.com/512/3820/3820224.png', 'channel')" class="flex items-center px-4 py-3 hover:bg-slate-800/60 cursor-pointer border-b border-slate-800/40 transition rounded-xl mx-2 my-1">
-                            <div class="bg-purple-600 text-white font-bold rounded-full w-12 h-12 flex items-center justify-center mr-3 text-lg shadow-lg">
+                        <div onclick="selectChat('${c.id}', '${c.name}', 'https://cdn-icons-png.flaticon.com/512/3820/3820224.png', 'channel')" class="group flex items-center px-4 py-3 hover:bg-slate-800/60 cursor-pointer transition rounded-2xl mx-2 my-1 border border-transparent hover:border-slate-700/50">
+                            <div class="bg-gradient-to-tr from-purple-600 to-indigo-500 text-white font-bold rounded-2xl w-12 h-12 flex items-center justify-center mr-3.5 text-lg shadow-lg">
                                 <i class="fa-solid fa-bullhorn"></i>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <h2 class="font-semibold truncate text-white text-sm">${c.name}</h2>
-                                <p class="text-xs text-slate-400">Broadcast Channel</p>
+                                <h2 class="font-bold truncate text-white text-sm">${c.name}</h2>
+                                <p class="text-xs text-slate-400 font-medium">Broadcast Channel</p>
                             </div>
                         </div>
                     `;
@@ -179,38 +195,182 @@
             });
         }
 
-        window.createStudyGroup = async function() {
-            const gName = prompt("නව Study Group එකේ නම ඇතුළත් කරන්න:");
-            if(!gName) return;
-            const gId = "group_" + Date.now();
-            await setDoc(doc(db, "groups", gId), { id: gId, name: gName, createdBy: currentUser.uid });
+        // Custom Beautiful Alert Modal for Group Creation
+        window.openCreateGroupModal = function() {
+            document.getElementById('custom-alert-input').value = '';
+            document.getElementById('custom-alert-modal').classList.remove('hidden');
+            document.getElementById('custom-alert-input').focus();
         }
 
-        window.createChannel = async function() {
-            const cName = prompt("නව Channel එකේ නම ඇතුළත් කරන්න:");
-            if(!cName) return;
-            const cId = "channel_" + Date.now();
-            await setDoc(doc(db, "channels", cId), { id: cId, name: cName, createdBy: currentUser.uid });
+        window.closeCreateGroupModal = function() {
+            document.getElementById('custom-alert-modal').classList.add('hidden');
+        }
+
+        window.confirmCreateGroup = async function() {
+            const gName = document.getElementById('custom-alert-input').value.trim();
+            if(!gName) {
+                alert("කරුණාකර ගෲප් නමක් ඇතුළත් කරන්න!");
+                return;
+            }
+            closeCreateGroupModal();
+
+            const gId = "group_" + Date.now();
+            const inviteCode = Math.random().toString(36).substring(2, 10);
+            
+            await setDoc(doc(db, "groups", gId), {
+                id: gId,
+                name: gName,
+                description: "Welcome to our WhatsApp style group!",
+                createdBy: currentUser.uid,
+                members: [currentUser.uid],
+                inviteCode: inviteCode,
+                createdAt: serverTimestamp()
+            });
+            
+            // Success Custom Notification
+            showToast("Group එක සාර්ථකව සාදන ලදී! 🎉");
+        }
+
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = "fixed bottom-5 right-5 bg-slate-900 border border-slate-700 text-white px-5 py-3 rounded-2xl shadow-2xl z-50 flex items-center space-x-3 animate-bounce";
+            toast.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400 text-lg"></i><span class="text-sm font-bold">${message}</span>`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        window.selectGroupChat = function(gData) {
+            if(unsubUserStatus) { unsubUserStatus(); unsubUserStatus = null; }
+            activeChat = { id: gData.id, name: gData.name, photo: 'https://cdn-icons-png.flaticon.com/512/166/166258.png', type: 'group', data: gData };
+            
+            document.getElementById('chat-placeholder').style.display = 'none';
+            document.getElementById('active-chat-box').style.display = 'flex';
+            document.getElementById('header-chat-name').innerText = gData.name;
+            document.getElementById('header-chat-img').src = 'https://cdn-icons-png.flaticon.com/512/166/166258.png';
+            document.getElementById('header-chat-status').innerText = `${gData.members ? gData.members.length : 1} members`;
+
+            loadMessages();
         }
 
         window.selectChat = function(id, name, photo, type) {
+            if(unsubUserStatus) { unsubUserStatus(); unsubUserStatus = null; }
             let chatId = id;
             if(type === 'user') {
                 chatId = [currentUser.uid, id].sort().join("_");
+                
+                // Track target user online status and last seen in real-time
+                unsubUserStatus = onSnapshot(doc(db, "users", id), (docSnap) => {
+                    if(docSnap.exists()) {
+                        const uData = docSnap.data();
+                        const statusEl = document.getElementById('header-chat-status');
+                        if(uData.isOnline) {
+                            statusEl.innerHTML = '<span class="text-emerald-400 font-semibold">Active now</span>';
+                        } else if(uData.lastSeen) {
+                            const lastSeenDate = uData.lastSeen.toDate();
+                            const timeStr = lastSeenDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const dateStr = lastSeenDate.toLocaleDateString();
+                            statusEl.innerText = `Last seen at ${timeStr} (${dateStr})`;
+                        } else {
+                            statusEl.innerText = 'Offline';
+                        }
+                    }
+                });
+            } else if(type === 'saved') {
+                chatId = `saved_${currentUser.uid}`;
             }
-            activeChat = { id: chatId, name, photo, type };
+
+            activeChat = { id: chatId, name, photo, type, data: null };
             
             let subtitle = 'Active now';
-            if(type === 'group') subtitle = 'Study Group';
             if(type === 'channel') subtitle = 'Broadcast Channel';
+            if(type === 'saved') subtitle = 'Your Cloud Storage';
 
             document.getElementById('chat-placeholder').style.display = 'none';
             document.getElementById('active-chat-box').style.display = 'flex';
             document.getElementById('header-chat-name').innerText = name;
             document.getElementById('header-chat-img').src = photo;
-            document.getElementById('header-chat-status').innerText = subtitle;
+            if(type !== 'user') {
+                document.getElementById('header-chat-status').innerText = subtitle;
+            }
 
             loadMessages();
+        }
+
+        window.openSavedMessages = function() {
+            selectChat(`saved_${currentUser.uid}`, "Saved Messages", "https://cdn-icons-png.flaticon.com/512/906/906334.png", "saved");
+        }
+
+        window.openGroupInfo = async function() {
+            if(activeChat.type !== 'group') return;
+            const docRef = doc(db, "groups", activeChat.id);
+            const docSnap = await getDoc(docRef);
+            if(!docSnap.exists()) return;
+            const g = docSnap.data();
+            activeChat.data = g;
+
+            const isAdmin = g.createdBy === currentUser.uid;
+
+            document.getElementById('info-group-name').innerText = g.name;
+            document.getElementById('info-group-desc').innerText = g.description || "No description";
+            document.getElementById('info-invite-link').value = `${window.location.origin}${window.location.pathname}?join=${g.inviteCode}`;
+            
+            if(isAdmin) {
+                document.getElementById('admin-controls-section').classList.remove('hidden');
+            } else {
+                document.getElementById('admin-controls-section').classList.add('hidden');
+            }
+
+            let membersHtml = '';
+            for(let mId of (g.members || [])) {
+                membersHtml += `<div class="flex items-center justify-between py-2 border-b border-slate-800 text-xs">
+                    <span class="text-slate-200 font-medium">${mId === g.createdBy ? '👑 ' + mId : mId}</span>
+                    ${isAdmin && mId !== currentUser.uid ? `<button onclick="removeMember('${mId}')" class="text-rose-400 font-bold hover:underline">Remove</button>` : ''}
+                </div>`;
+            }
+            document.getElementById('group-members-list').innerHTML = membersHtml;
+
+            document.getElementById('group-info-modal').classList.remove('hidden');
+        }
+
+        window.closeGroupInfo = () => document.getElementById('group-info-modal').classList.add('hidden');
+
+        window.updateGroupDetails = async function() {
+            const newName = prompt("새로운 Group Name එක ඇතුළත් කරන්න:", activeChat.data.name);
+            if(!newName) return;
+            const newDesc = prompt("새로운 Description එක ඇතුළත් කරන්න:", activeChat.data.description);
+            
+            await updateDoc(doc(db, "groups", activeChat.id), {
+                name: newName,
+                description: newDesc || ""
+            });
+            showToast("ගෲප් තොරතුරු යාවත්කාලීන කරන ලදී!");
+            closeGroupInfo();
+        }
+
+        window.copyInviteLink = function() {
+            const copyText = document.getElementById('info-invite-link');
+            copyText.select();
+            navigator.clipboard.writeText(copyText.value);
+            showToast("Invite Link එක Copy කරගන්න ලදී!");
+        }
+
+        window.removeMember = async function(mId) {
+            if(!confirm("මෙම සාමාජිකයාව ඉවත් කිරීමට අවශ්‍යද?")) return;
+            await updateDoc(doc(db, "groups", activeChat.id), {
+                members: arrayRemove(mId)
+            });
+            showToast("සාමාජිකයා ඉවත් කරන ලදී.");
+            closeGroupInfo();
+        }
+
+        window.leaveCurrentGroup = async function() {
+            if(!confirm("ඔබට මෙම ගෲප් එකෙන් ඉවත් වීමට අවශ්‍යද?")) return;
+            await updateDoc(doc(db, "groups", activeChat.id), {
+                members: arrayRemove(currentUser.uid)
+            });
+            showToast("ඔබ ගෲප් එකෙන් ඉවත් විය.");
+            closeGroupInfo();
+            location.reload();
         }
 
         window.sendDatabaseMessage = async function(customText = null, fileData = null, fileType = 'text') {
@@ -221,6 +381,7 @@
             let colPath = `chats/${activeChat.id}/messages`;
             if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
             if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
+            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
 
             try {
                 await addDoc(collection(db, colPath), {
@@ -265,10 +426,10 @@
                     reader.readAsDataURL(audioBlob);
                 };
                 mediaRecorder.start();
-                document.getElementById('mic-btn').className = "text-red-500 animate-pulse text-xl px-3 py-2";
+                document.getElementById('mic-btn').className = "text-rose-500 animate-pulse text-xl px-2.5 py-1";
             } else {
                 mediaRecorder.stop();
-                document.getElementById('mic-btn').className = "text-slate-400 hover:text-white text-xl px-3 py-2";
+                document.getElementById('mic-btn').className = "text-slate-400 hover:text-white text-xl px-2.5 py-1";
             }
         }
 
@@ -277,6 +438,7 @@
             let colPath = `chats/${activeChat.id}/messages`;
             if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
             if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
+            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
             await deleteDoc(doc(db, colPath, msgId));
         }
 
@@ -284,6 +446,7 @@
             let colPath = `chats/${activeChat.id}/messages`;
             if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
             if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
+            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
             await updateDoc(doc(db, colPath, msgId), { isPinned: !currentPinState });
         }
 
@@ -302,9 +465,9 @@
             let colPath = `chats/${activeChat.id}/messages`;
             if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
             if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
+            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
 
             const msgRef = doc(db, colPath, msgId);
-            // Simple toggle reaction implementation
             await updateDoc(msgRef, {
                 [`reactions.${currentUser.uid}`]: emoji
             });
@@ -318,6 +481,7 @@
             let colPath = `chats/${activeChat.id}/messages`;
             if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
             if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
+            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
 
             const q = query(collection(db, colPath), orderBy("timestamp", "asc"));
 
@@ -341,79 +505,77 @@
                     let replyHtml = '';
                     if(msg.replyTo) {
                         replyHtml = `
-                            <div class="bg-black/30 border-l-4 border-[var(--theme-color)] p-1.5 mb-2 rounded text-xs">
+                            <div class="bg-black/30 border-l-4 border-[var(--theme-color)] p-2 mb-2 rounded-xl text-xs backdrop-blur-sm">
                                 <p class="font-bold text-[var(--theme-color)]">${msg.replyTo.senderName}</p>
                                 <p class="truncate text-slate-300">${msg.replyTo.text}</p>
                             </div>
                         `;
                     }
 
-                    let content = `<p class="break-words">${msg.text}</p>`;
+                    let content = `<p class="break-words leading-relaxed">${msg.text}</p>`;
                     if(msg.fileData) {
-                        if(msg.fileType === 'image') content += `<img src="${msg.fileData}" class="mt-2 max-w-xs rounded-xl max-h-48 object-cover cursor-pointer border border-slate-700" onclick="window.open('${msg.fileData}')">`;
-                        else if(msg.fileType === 'audio') content += `<audio controls class="mt-2 w-64"><source src="${msg.fileData}" type="audio/mp3"></audio>`;
-                        else content += `<a href="${msg.fileData}" download class="block mt-2 underline text-xs font-bold text-cyan-400">📥 Download File</a>`;
+                        if(msg.fileType === 'image') content += `<img src="${msg.fileData}" class="mt-2.5 max-w-xs rounded-2xl max-h-56 object-cover cursor-pointer border border-slate-700/50 shadow-md" onclick="window.open('${msg.fileData}')">`;
+                        else if(msg.fileType === 'audio') content += `<audio controls class="mt-2.5 w-64"><source src="${msg.fileData}" type="audio/mp3"></audio>`;
+                        else content += `<a href="${msg.fileData}" download class="block mt-2.5 underline text-xs font-bold text-cyan-400">📥 Download Attached File</a>`;
                     }
 
                     let reactionsHtml = '';
                     if(msg.reactions && Object.keys(msg.reactions).length > 0) {
                         let rValues = Object.values(msg.reactions);
-                        reactionsHtml = `<div class="flex space-x-1 mt-1 bg-slate-900/60 px-2 py-0.5 rounded-full w-fit text-xs">${rValues.join(' ')}</div>`;
+                        reactionsHtml = `<div class="flex space-x-1 mt-1.5 bg-slate-900/80 px-2.5 py-0.5 rounded-full w-fit text-xs border border-slate-700/40">${rValues.join(' ')}</div>`;
                     }
 
                     container.innerHTML += `
-                        <div class="flex flex-col max-w-[70%] rounded-2xl p-3.5 text-sm relative group ${isMe ? 'self-end bg-[var(--my-msg-bg)] text-white rounded-tr-none shadow-lg' : 'self-start bg-[var(--other-msg-bg)] text-white rounded-tl-none shadow-lg'}">
-                            ${(activeChat.type === 'group' || activeChat.type === 'channel') && !isMe ? `<span class="text-xs text-[var(--theme-color)] font-bold mb-1">${msg.senderName}</span>` : ''}
+                        <div class="flex flex-col max-w-[75%] rounded-3xl p-4 text-sm relative group transition-all ${isMe ? 'self-end bg-[var(--my-msg-bg)] text-white rounded-tr-sm shadow-xl' : 'self-start bg-[var(--other-msg-bg)] text-white rounded-tl-sm shadow-xl border border-slate-800/80'}">
+                            ${(activeChat.type === 'group' || activeChat.type === 'channel') && !isMe ? `<span class="text-xs text-[var(--theme-color)] font-bold mb-1.5">${msg.senderName}</span>` : ''}
                             ${replyHtml}
                             ${content}
                             ${reactionsHtml}
-                            <div class="flex items-center justify-end space-x-1.5 mt-1">
-                                <span class="text-[10px] text-slate-300">${time}</span>
+                            <div class="flex items-center justify-end space-x-2 mt-1.5">
+                                <span class="text-[10px] text-slate-300 font-medium">${time}</span>
                                 ${isMe ? '<i class="fa-solid fa-check-double text-[10px] text-cyan-400"></i>' : ''}
-                                <div class="hidden group-hover:flex space-x-2 ml-2 bg-slate-900/80 px-2 py-1 rounded-lg">
-                                    <button onclick="setReply('${docSnap.id}', '${msg.senderName}', '${msg.text}')" title="Reply"><i class="fa-solid fa-reply text-xs text-blue-400"></i></button>
-                                    <button onclick="addReaction('${docSnap.id}', '❤️')" title="React"><i class="fa-solid fa-heart text-xs text-red-400"></i></button>
-                                    <button onclick="addReaction('${docSnap.id}', '👍')" title="React"><i class="fa-solid fa-thumbs-up text-xs text-green-400"></i></button>
-                                    <button onclick="togglePinMessage('${docSnap.id}', ${msg.isPinned})" title="Pin"><i class="fa-solid fa-thumbtack text-xs text-yellow-400"></i></button>
-                                    ${isMe ? `<button onclick="deleteMessage('${docSnap.id}')" title="Delete"><i class="fa-solid fa-trash text-xs text-red-500"></i></button>` : ''}
+                                <div class="hidden group-hover:flex space-x-2 ml-2 bg-slate-900/90 backdrop-blur-md px-2.5 py-1 rounded-xl shadow-lg border border-slate-700/50">
+                                    <button onclick="setReply('${docSnap.id}', '${msg.senderName}', '${msg.text}')" title="Reply"><i class="fa-solid fa-reply text-xs text-blue-400 hover:scale-125 transition"></i></button>
+                                    <button onclick="addReaction('${docSnap.id}', '❤️')" title="Love"><i class="fa-solid fa-heart text-xs text-rose-500 hover:scale-125 transition"></i></button>
+                                    <button onclick="addReaction('${docSnap.id}', '🔥')" title="Fire"><i class="fa-solid fa-fire text-xs text-amber-500 hover:scale-125 transition"></i></button>
+                                    <button onclick="togglePinMessage('${docSnap.id}', ${msg.isPinned})" title="Pin"><i class="fa-solid fa-thumbtack text-xs text-yellow-400 hover:scale-125 transition"></i></button>
+                                    ${isMe ? `<button onclick="deleteMessage('${docSnap.id}')" title="Delete"><i class="fa-solid fa-trash text-xs text-rose-500 hover:scale-125 transition"></i></button>` : ''}
                                 </div>
                             </div>
                         </div>
                     `;
                 });
                 container.scrollTop = container.scrollHeight;
-                if(!isMe && lastMsgId) notifSound.play().catch(e => {});
+                
+                if(!isMe && lastMsgId && notifEnabled) {
+                    notifSound.volume = notifVolume;
+                    notifSound.play().catch(e => {});
+                }
             });
         }
 
         window.toggleEmojiPicker = () => document.getElementById('emoji-picker').classList.toggle('hidden');
         window.addEmoji = (em) => { document.getElementById('msg-input').value += em; toggleEmojiPicker(); }
 
-        window.toggleSettingsModal = function() {
-            document.getElementById('settings-modal').classList.toggle('hidden');
-        }
-
+        window.toggleSettingsModal = () => document.getElementById('settings-modal').classList.toggle('hidden');
         window.changeThemeColor = function(primaryColor, myMsgBg, otherMsgBg) {
             document.documentElement.style.setProperty('--theme-color', primaryColor);
             document.documentElement.style.setProperty('--my-msg-bg', myMsgBg);
             document.documentElement.style.setProperty('--other-msg-bg', otherMsgBg);
-            
             localStorage.setItem('chat_theme', JSON.stringify({ primaryColor, myMsgBg, otherMsgBg }));
-            alert("Appearance & Theme വിജയవంతವಾಗಿ වෙනස් කරන ලදී!");
-            toggleSettingsModal();
+            showToast("തීම් වෙනස් කරන ලදී!");
         }
 
-        window.loadSavedTheme = function() {
-            const saved = localStorage.getItem('chat_theme');
-            if(saved) {
-                const t = JSON.parse(saved);
+        window.loadSavedPreferences = function() {
+            const savedTheme = localStorage.getItem('chat_theme');
+            if(savedTheme) {
+                const t = JSON.parse(savedTheme);
                 document.documentElement.style.setProperty('--theme-color', t.primaryColor);
                 document.documentElement.style.setProperty('--my-msg-bg', t.myMsgBg);
                 document.documentElement.style.setProperty('--other-msg-bg', t.otherMsgBg);
             }
         }
-
-        window.addEventListener('DOMContentLoaded', () => loadSavedTheme());
+        window.addEventListener('DOMContentLoaded', () => loadSavedPreferences());
     </script>
 
     <style>
@@ -422,24 +584,22 @@
             --my-msg-bg: #1d4ed8;
             --other-msg-bg: #1e293b;
         }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-        .tg-wallpaper { background-color: #0b1120; background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 24px 24px; }
-        .custom-theme-btn { border: 2px solid rgba(255,255,255,0.1); transition: transform 0.2s; }
-        .custom-theme-btn:hover { transform: scale(1.03); }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .tg-wallpaper { background-color: #030712; background-image: radial-gradient(rgba(37, 99, 235, 0.08) 1px, transparent 1px); background-size: 28px 28px; }
     </style>
 </head>
-<body class="bg-slate-950 h-screen w-screen overflow-hidden flex items-center justify-center p-0 md:p-3 text-slate-100 font-sans">
+<body class="bg-[#030712] h-screen w-screen overflow-hidden flex items-center justify-center p-0 md:p-3 text-slate-100 font-sans">
 
     <!-- LOGIN SCREEN -->
-    <div id="login-screen" class="fixed inset-0 bg-[#0b1120] z-50 flex flex-col items-center justify-center space-y-6">
-        <div class="text-center space-y-3 bg-slate-900/80 p-8 rounded-3xl border border-slate-800 shadow-2xl max-w-md w-full mx-4 backdrop-blur-md">
-            <div class="w-20 h-20 bg-[var(--theme-color)] rounded-2xl mx-auto flex items-center justify-center shadow-xl">
+    <div id="login-screen" class="fixed inset-0 bg-[#030712] z-50 flex flex-col items-center justify-center p-4">
+        <div class="text-center space-y-4 bg-slate-900/80 p-10 rounded-3xl border border-slate-800 shadow-2xl max-w-md w-full backdrop-blur-xl">
+            <div class="w-24 h-24 bg-gradient-to-tr from-[var(--theme-color)] to-indigo-500 rounded-3xl mx-auto flex items-center justify-center shadow-2xl shadow-blue-500/20">
                 <i class="fa-solid fa-comments text-4xl text-white"></i>
             </div>
-            <h1 class="text-3xl font-black text-white">Super Chat Hub</h1>
-            <p class="text-sm text-slate-400">Telegram සහ WhatsApp වල සියලුම පහසුකම් එකම තැනකින් ලබාගන්න.</p>
-            <button onclick="loginWithGoogle()" class="w-full flex items-center justify-center space-x-3 bg-white text-slate-900 px-6 py-3.5 rounded-2xl font-bold shadow-xl hover:bg-slate-100 transition">
+            <h1 class="text-3xl font-black text-white tracking-tight">Super Chat Hub</h1>
+            <p class="text-sm text-slate-400 font-medium">WhatsApp Style Groups & Secure Messaging.</p>
+            <button onclick="loginWithGoogle()" class="w-full flex items-center justify-center space-x-3 bg-white text-slate-900 px-6 py-4 rounded-2xl font-bold shadow-xl hover:bg-slate-100 transition transform active:scale-95">
                 <img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-6 h-6">
                 <span>Sign in with Google</span>
             </button>
@@ -447,52 +607,47 @@
     </div>
 
     <!-- MAIN APP CONTAINER -->
-    <div id="app-container" class="hidden flex w-full h-full max-w-[1700px] bg-slate-900 shadow-2xl rounded-none md:rounded-2xl overflow-hidden border border-slate-800">
+    <div id="app-container" class="hidden flex w-full h-full max-w-[1750px] bg-slate-900/90 shadow-2xl rounded-none md:rounded-3xl overflow-hidden border border-slate-800/80 backdrop-blur-2xl">
 
         <!-- SIDEBAR -->
-        <div class="w-full md:w-[400px] bg-slate-900 border-r border-slate-800 flex flex-col z-20">
+        <div class="w-full md:w-[410px] bg-slate-950/80 border-r border-slate-800/80 flex flex-col z-20">
             <!-- Top Profile Bar -->
-            <div class="px-4 py-4 flex justify-between items-center bg-slate-900/90 border-b border-slate-800">
-                <div class="flex items-center space-x-3">
-                    <img id="nav-profile-img" src="" class="w-11 h-11 rounded-full object-cover border-2 border-[var(--theme-color)] shadow-md">
-                    <h1 id="current-username" class="text-base font-bold text-white tracking-wide truncate"></h1>
+            <div class="px-5 py-4 flex justify-between items-center bg-slate-950 border-b border-slate-800/80">
+                <div class="flex items-center space-x-3.5">
+                    <img id="nav-profile-img" src="" class="w-12 h-12 rounded-2xl object-cover border-2 border-[var(--theme-color)] shadow-lg">
+                    <h1 id="current-username" class="text-sm font-bold text-white tracking-wide truncate"></h1>
                 </div>
                 <div class="flex items-center space-x-2">
-                    <button onclick="toggleSettingsModal()" class="w-10 h-10 rounded-xl bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center transition" title="Appearance & Settings"><i class="fa-solid fa-gear"></i></button>
-                    <button onclick="logoutUser()" class="w-10 h-10 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center justify-center transition" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></button>
+                    <button onclick="openSavedMessages()" class="w-10 h-10 rounded-2xl bg-slate-900 text-[var(--theme-color)] hover:bg-slate-800 flex items-center justify-center transition border border-slate-800 shadow-sm" title="Saved Messages"><i class="fa-solid fa-bookmark"></i></button>
+                    <button onclick="toggleSettingsModal()" class="w-10 h-10 rounded-2xl bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 flex items-center justify-center transition border border-slate-800 shadow-sm" title="Settings"><i class="fa-solid fa-gear"></i></button>
+                    <button onclick="logoutUser()" class="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 flex items-center justify-center transition border border-rose-500/10" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></button>
                 </div>
             </div>
 
-            <!-- Telegram Style Tabs -->
-            <div class="flex border-b border-slate-800 bg-slate-900 text-xs font-semibold text-slate-400">
-                <button onclick="switchTab('chats')" id="btn-chats" class="tab-btn flex-1 py-3 text-center text-[var(--theme-color)] border-b-2 border-[var(--theme-color)] transition"><i class="fa-solid fa-user-group mr-1"></i> Chats</button>
-                <button onclick="switchTab('groups')" id="btn-groups" class="tab-btn flex-1 py-3 text-center transition"><i class="fa-solid fa-users mr-1"></i> Groups</button>
-                <button onclick="switchTab('channels')" id="btn-channels" class="tab-btn flex-1 py-3 text-center transition"><i class="fa-solid fa-bullhorn mr-1"></i> Channels</button>
+            <!-- Tabs -->
+            <div class="flex border-b border-slate-800/80 bg-slate-950/50 text-xs font-bold text-slate-400 p-2 gap-1">
+                <button onclick="switchTab('chats')" id="btn-chats" class="tab-btn flex-1 py-2.5 text-center text-[var(--theme-color)] bg-slate-800/40 rounded-xl transition shadow-sm"><i class="fa-solid fa-user-group mr-1.5"></i> Chats</button>
+                <button onclick="switchTab('groups')" id="btn-groups" class="tab-btn flex-1 py-2.5 text-center rounded-xl transition"><i class="fa-solid fa-users mr-1.5"></i> Groups</button>
+                <button onclick="switchTab('channels')" id="btn-channels" class="tab-btn flex-1 py-2.5 text-center rounded-xl transition"><i class="fa-solid fa-bullhorn mr-1.5"></i> Channels</button>
             </div>
 
             <!-- Tab Content Area -->
-            <div class="flex-1 overflow-y-auto">
-                <!-- Chats Tab -->
-                <div id="tab-chats" class="tab-content py-2">
-                    <div class="text-xs font-bold text-slate-400 px-4 pt-2 pb-1 uppercase tracking-wider">Direct Students</div>
+            <div class="flex-1 overflow-y-auto px-1 py-2">
+                <div id="tab-chats" class="tab-content">
+                    <div class="text-[11px] font-bold text-slate-400 px-4 pt-2 pb-1 uppercase tracking-wider">Direct Students</div>
                     <div id="users-list"></div>
                 </div>
 
-                <!-- Groups Tab -->
-                <div id="tab-groups" class="tab-content hidden py-2">
+                <div id="tab-groups" class="tab-content hidden">
                     <div class="px-4 pt-2 pb-1 flex justify-between items-center">
-                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Study Groups</span>
-                        <button onclick="createStudyGroup()" class="bg-[var(--theme-color)] text-white px-3 py-1 rounded-xl text-xs font-bold shadow-md hover:opacity-90">+ New Group</button>
+                        <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">My Groups</span>
+                        <button onclick="openCreateGroupModal()" class="bg-[var(--theme-color)] text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg hover:opacity-95 transition">+ New Group</button>
                     </div>
                     <div id="groups-list"></div>
                 </div>
 
-                <!-- Channels Tab -->
-                <div id="tab-channels" class="tab-content hidden py-2">
-                    <div class="px-4 pt-2 pb-1 flex justify-between items-center">
-                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Broadcast Channels</span>
-                        <button onclick="createChannel()" class="bg-purple-600 text-white px-3 py-1 rounded-xl text-xs font-bold shadow-md hover:opacity-90">+ New Channel</button>
-                    </div>
+                <div id="tab-channels" class="tab-content hidden">
+                    <div class="px-4 pt-2 pb-1"><span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Channels</span></div>
                     <div id="channels-list"></div>
                 </div>
             </div>
@@ -501,30 +656,31 @@
         <!-- CHAT AREA -->
         <div class="hidden md:flex flex-col flex-1 tg-wallpaper relative h-full">
             <div id="chat-placeholder" class="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-400">
-                <div class="w-24 h-24 bg-slate-800/50 rounded-full flex items-center justify-center mb-4 border border-slate-700/50 shadow-inner">
+                <div class="w-24 h-24 bg-slate-900/60 rounded-3xl flex items-center justify-center mb-4 border border-slate-800 shadow-xl backdrop-blur-md">
                     <i class="fa-solid fa-paper-plane text-4xl text-[var(--theme-color)]"></i>
                 </div>
                 <h2 class="text-xl font-bold text-slate-200">Welcome to Super Chat Hub</h2>
-                <p class="text-sm mt-1 text-slate-400">කතාබස් කිරීමට වම්පසින් කණ්ඩායමක්, චැනලයක් හෝ සිසුවෙක් තෝරන්න.</p>
+                <p class="text-sm mt-1 text-slate-400 max-w-sm">කතාබස් කිරීමට වම්පසින් චැට් එකක් හෝ ගෲප් එකක් තෝරන්න.</p>
             </div>
 
             <div id="active-chat-box" class="hidden flex-col h-full w-full">
                 <!-- Chat Header -->
-                <div class="bg-slate-900/95 px-5 py-3.5 flex justify-between items-center border-b border-slate-800 z-10 shadow-md backdrop-blur-md">
-                    <div class="flex items-center space-x-3.5">
-                        <img id="header-chat-img" src="" class="rounded-full w-12 h-12 object-cover border-2 border-[var(--theme-color)] shadow-sm">
+                <div onclick="openGroupInfo()" class="bg-slate-950/80 px-6 py-4 flex justify-between items-center border-b border-slate-800/80 z-10 shadow-lg backdrop-blur-xl cursor-pointer hover:bg-slate-900/50 transition">
+                    <div class="flex items-center space-x-4">
+                        <img id="header-chat-img" src="" class="rounded-2xl w-12 h-12 object-cover border-2 border-[var(--theme-color)] shadow-md">
                         <div>
                             <h2 id="header-chat-name" class="font-bold text-white text-base"></h2>
-                            <span id="header-chat-status" class="text-xs text-[var(--theme-color)] font-medium">Online</span>
+                            <span id="header-chat-status" class="text-xs text-slate-400 font-medium">Click for info</span>
                         </div>
                     </div>
+                    <div><i class="fa-solid fa-ellipsis-vertical text-slate-400 text-lg px-2"></i></div>
                 </div>
 
                 <!-- Pinned Message Banner -->
-                <div id="pinned-banner" class="hidden bg-slate-800/90 border-b border-slate-700 px-5 py-2 text-xs flex items-center justify-between z-10 text-yellow-400 shadow-sm">
-                    <div class="flex items-center space-x-2.5 truncate">
+                <div id="pinned-banner" class="hidden bg-slate-900/90 border-b border-slate-800 px-6 py-2.5 text-xs flex items-center justify-between z-10 text-amber-400 shadow-md backdrop-blur-md">
+                    <div class="flex items-center space-x-3 truncate">
                         <i class="fa-solid fa-thumbtack"></i>
-                        <span id="pinned-text" class="truncate font-medium">Pinned message</span>
+                        <span id="pinned-text" class="truncate font-semibold">Pinned message</span>
                     </div>
                 </div>
 
@@ -532,16 +688,16 @@
                 <div id="messages-container" class="flex-1 overflow-y-auto p-6 space-y-4 z-10 flex flex-col"></div>
 
                 <!-- Reply Preview Box -->
-                <div id="reply-preview-container" class="hidden bg-slate-900/90 px-4 py-2 border-t border-slate-800 flex justify-between items-center z-20">
-                    <div class="border-l-4 border-[var(--theme-color)] pl-3 text-xs">
+                <div id="reply-preview-container" class="hidden bg-slate-950/90 px-5 py-2.5 border-t border-slate-800 flex justify-between items-center z-20 backdrop-blur-md">
+                    <div class="border-l-4 border-[var(--theme-color)] pl-3.5 text-xs">
                         <p class="text-slate-400 font-bold">Replying to message:</p>
-                        <p id="replying-text-preview" class="text-slate-200 truncate max-w-xl"></p>
+                        <p id="replying-text-preview" class="text-slate-200 truncate max-w-2xl font-medium"></p>
                     </div>
                     <button onclick="cancelReply()" class="text-slate-400 hover:text-white px-2 py-1"><i class="fa-solid fa-xmark text-lg"></i></button>
                 </div>
 
                 <!-- Emoji Picker -->
-                <div id="emoji-picker" class="hidden absolute bottom-24 left-6 bg-slate-900 border border-slate-700 p-3 rounded-2xl shadow-2xl grid grid-cols-6 gap-2.5 z-30">
+                <div id="emoji-picker" class="hidden absolute bottom-24 left-6 bg-slate-950/95 border border-slate-800 p-3.5 rounded-3xl shadow-2xl grid grid-cols-6 gap-3 z-30 backdrop-blur-2xl">
                     <span onclick="addEmoji('😀')" class="cursor-pointer text-2xl hover:scale-125 transition">😀</span>
                     <span onclick="addEmoji('😂')" class="cursor-pointer text-2xl hover:scale-125 transition">😂</span>
                     <span onclick="addEmoji('❤️')" class="cursor-pointer text-2xl hover:scale-125 transition">❤️</span>
@@ -551,17 +707,17 @@
                 </div>
 
                 <!-- Footer Input Bar -->
-                <div class="bg-slate-900 px-4 py-3.5 flex items-center space-x-3 z-10 border-t border-slate-800">
-                    <button onclick="toggleEmojiPicker()" class="text-slate-400 hover:text-white text-xl px-2 py-1"><i class="fa-regular fa-face-smile"></i></button>
-                    <label class="text-slate-400 hover:text-white text-xl cursor-pointer px-2 py-1">
+                <div class="bg-slate-950/80 px-5 py-4 flex items-center space-x-3.5 z-10 border-t border-slate-800/80 backdrop-blur-xl">
+                    <button onclick="toggleEmojiPicker()" class="text-slate-400 hover:text-white text-xl px-2.5 py-1 transition"><i class="fa-regular fa-face-smile"></i></button>
+                    <label class="text-slate-400 hover:text-white text-xl cursor-pointer px-2.5 py-1 transition">
                         <i class="fa-solid fa-paperclip"></i>
                         <input type="file" onchange="handleFileUpload(event)" class="hidden">
                     </label>
-                    <button id="mic-btn" onclick="toggleVoiceRecording()" class="text-slate-400 hover:text-white text-xl px-2 py-1"><i class="fa-solid fa-microphone"></i></button>
+                    <button id="mic-btn" onclick="toggleVoiceRecording()" class="text-slate-400 hover:text-white text-xl px-2.5 py-1 transition"><i class="fa-solid fa-microphone"></i></button>
                     
-                    <input type="text" id="msg-input" placeholder="Write a message..." onkeypress="if(event.key === 'Enter') sendDatabaseMessage()" class="flex-1 bg-slate-800 text-white px-4.5 py-3 rounded-xl outline-none text-sm border border-slate-700 focus:border-[var(--theme-color)] shadow-inner">
+                    <input type="text" id="msg-input" placeholder="Write a message..." onkeypress="if(event.key === 'Enter') sendDatabaseMessage()" class="flex-1 bg-slate-900 text-white px-5 py-3.5 rounded-2xl outline-none text-sm border border-slate-800 focus:border-[var(--theme-color)] shadow-inner transition">
                     
-                    <button onclick="sendDatabaseMessage()" class="bg-[var(--theme-color)] text-white w-12 h-12 rounded-xl flex items-center justify-center hover:opacity-90 shadow-lg font-bold transition">
+                    <button onclick="sendDatabaseMessage()" class="bg-[var(--theme-color)] text-white w-12 h-12 rounded-2xl flex items-center justify-center hover:opacity-95 shadow-lg shadow-blue-500/20 font-bold transition transform active:scale-95">
                         <i class="fa-solid fa-paper-plane text-sm"></i>
                     </button>
                 </div>
@@ -569,46 +725,88 @@
         </div>
     </div>
 
-    <!-- SETTINGS & APPEARANCE MODAL -->
-    <div id="settings-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-6">
-            <div class="flex justify-between items-center border-b border-slate-800 pb-4">
-                <h2 class="text-lg font-bold text-white flex items-center space-x-2"><i class="fa-solid fa-palette text-[var(--theme-color)]"></i> <span>Appearance & Settings</span></h2>
-                <button onclick="toggleSettingsModal()" class="text-slate-400 hover:text-white text-lg w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-
-            <div class="space-y-4">
-                <p class="text-sm text-slate-300 font-medium">ඔබේ යෙදුමේ වර්ණ සහ පෙනුම (Theme Colors) වෙනස් කරගන්න:</p>
-                <div class="grid grid-cols-2 gap-3">
-                    <button onclick="changeThemeColor('#2563eb', '#1d4ed8', '#1e293b')" class="custom-theme-btn p-3.5 rounded-2xl bg-slate-950 flex items-center space-x-3 text-left">
-                        <span class="w-6 h-6 rounded-full bg-blue-600 block shadow-md"></span>
-                        <div>
-                            <p class="text-xs font-bold text-white">Telegram Blue</p>
-                        </div>
-                    </button>
-                    <button onclick="changeThemeColor('#059669', '#047857', '#1e293b')" class="custom-theme-btn p-3.5 rounded-2xl bg-slate-950 flex items-center space-x-3 text-left">
-                        <span class="w-6 h-6 rounded-full bg-emerald-600 block shadow-md"></span>
-                        <div>
-                            <p class="text-xs font-bold text-white">WhatsApp Green</p>
-                        </div>
-                    </button>
-                    <button onclick="changeThemeColor('#9333ea', '#7e22ce', '#1e293b')" class="custom-theme-btn p-3.5 rounded-2xl bg-slate-950 flex items-center space-x-3 text-left">
-                        <span class="w-6 h-6 rounded-full bg-purple-600 block shadow-md"></span>
-                        <div>
-                            <p class="text-xs font-bold text-white">Royal Purple</p>
-                        </div>
-                    </button>
-                    <button onclick="changeThemeColor('#ea580c', '#c2410c', '#1e293b')" class="custom-theme-btn p-3.5 rounded-2xl bg-slate-950 flex items-center space-x-3 text-left">
-                        <span class="w-6 h-6 rounded-full bg-orange-600 block shadow-md"></span>
-                        <div>
-                            <p class="text-xs font-bold text-white">Sunset Orange</p>
-                        </div>
-                    </button>
+    <!-- CUSTOM BEAUTIFUL ALERT MODAL (Replaces Browser Prompt) -->
+    <div id="custom-alert-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+        <div class="bg-slate-950 border border-slate-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in duration-200">
+            <div class="flex items-center space-x-3 text-[var(--theme-color)]">
+                <div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-xl">
+                    <i class="fa-solid fa-users-rectangle"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white">নতুন Study Group</h3>
+                    <p class="text-xs text-slate-400">ගෲප් එකක් නිර්මාණය කරන්න</p>
                 </div>
             </div>
+            
+            <div class="space-y-2">
+                <label class="text-xs font-bold text-slate-300">Study Group එකේ නම ඇතුළත් කරන්න:</label>
+                <input type="text" id="custom-alert-input" placeholder="උදා: Advanced Mathematics" class="w-full bg-slate-900 text-white px-4 py-3 rounded-2xl text-sm border border-slate-800 focus:border-[var(--theme-color)] outline-none shadow-inner">
+            </div>
 
-            <div class="pt-4 border-t border-slate-800 flex justify-end">
-                <button onclick="toggleSettingsModal()" class="bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-700 transition">Save & Close</button>
+            <div class="flex space-x-3 pt-2">
+                <button onclick="closeCreateGroupModal()" class="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-300 py-3 rounded-2xl text-xs font-bold border border-slate-800 transition">Cancel</button>
+                <button onclick="confirmCreateGroup()" class="flex-1 bg-[var(--theme-color)] hover:opacity-95 text-white py-3 rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/20 transition">Create Group</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GROUP INFO MODAL -->
+    <div id="group-info-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+        <div class="bg-slate-950 border border-slate-800 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="px-6 py-4 bg-slate-900 flex justify-between items-center border-b border-slate-800">
+                <h2 class="text-base font-bold text-white">Group Info</h2>
+                <button onclick="closeGroupInfo()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="p-6 overflow-y-auto space-y-5">
+                <div class="text-center space-y-2">
+                    <div class="w-20 h-20 bg-gradient-to-tr from-[var(--theme-color)] to-blue-400 rounded-3xl mx-auto flex items-center justify-center text-3xl text-white shadow-lg">
+                        <i class="fa-solid fa-users"></i>
+                    </div>
+                    <h3 id="info-group-name" class="text-lg font-bold text-white">Group Name</h3>
+                    <p id="info-group-desc" class="text-xs text-slate-400">Description</p>
+                </div>
+
+                <div class="bg-slate-900 p-4 rounded-2xl space-y-2 border border-slate-800">
+                    <label class="text-xs font-bold text-slate-300">WhatsApp Invite Link</label>
+                    <div class="flex space-x-2">
+                        <input type="text" id="info-invite-link" readonly class="bg-slate-950 text-slate-300 text-xs px-3 py-2 rounded-xl flex-1 border border-slate-800 outline-none">
+                        <button onclick="copyInviteLink()" class="bg-[var(--theme-color)] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md">Copy</button>
+                    </div>
+                </div>
+
+                <div id="admin-controls-section" class="hidden space-y-3 pt-2 border-t border-slate-800">
+                    <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">Admin Controls</span>
+                    <button onclick="updateGroupDetails()" class="w-full bg-slate-900 hover:bg-slate-800 text-white py-2.5 rounded-xl text-xs font-bold border border-slate-800 transition">Edit Group Profile (Name/Desc)</button>
+                </div>
+
+                <div class="space-y-2 pt-2 border-t border-slate-800">
+                    <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Members</span>
+                    <div id="group-members-list" class="space-y-1 max-h-36 overflow-y-auto pr-1"></div>
+                </div>
+
+                <div class="pt-4 border-t border-slate-800">
+                    <button onclick="leaveCurrentGroup()" class="w-full bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 py-3 rounded-2xl text-xs font-bold border border-rose-500/10 transition">Leave Group</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+        <div class="bg-slate-950 border border-slate-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-5">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h2 class="text-base font-bold text-white">Theme Customizer</h2>
+                <button onclick="toggleSettingsModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="changeThemeColor('#2563eb', '#1d4ed8', '#1e293b')" class="p-3.5 rounded-2xl bg-slate-900 flex items-center space-x-3 text-left border border-slate-800">
+                    <span class="w-5 h-5 rounded-full bg-blue-600 block"></span>
+                    <span class="text-xs font-bold text-white">Telegram Blue</span>
+                </button>
+                <button onclick="changeThemeColor('#059669', '#047857', '#1e293b')" class="p-3.5 rounded-2xl bg-slate-900 flex items-center space-x-3 text-left border border-slate-800">
+                    <span class="w-5 h-5 rounded-full bg-emerald-600 block"></span>
+                    <span class="text-xs font-bold text-white">WhatsApp Green</span>
+                </button>
             </div>
         </div>
     </div>
