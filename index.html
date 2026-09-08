@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Chat Hub - Custom Alerts & Last Seen</title>
+    <title>Super Chat Hub - Clear Chat & Delete for Everyone</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -28,7 +28,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, doc, updateDoc, deleteDoc, getDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, doc, updateDoc, deleteDoc, getDoc, arrayUnion, arrayRemove, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDS8V5xE31W8CsrvGXRE-g_93yadXtPbh0",
@@ -51,11 +51,12 @@
         let replyingTo = null;
         let mediaRecorder = null;
         let audioChunks = [];
-        let unsubUserStatus = null; // Last seen listener
+        let unsubUserStatus = null;
+        let unsubMessages = null;
 
-        let notifVolume = 0.5;
-        let notifEnabled = true;
         const notifSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
+        let notifEnabled = true;
+        let notifVolume = 0.5;
 
         window.loginWithGoogle = function() {
             signInWithPopup(auth, provider)
@@ -70,7 +71,6 @@
                     lastSeen: serverTimestamp()
                 }, { merge: true });
 
-                // Set offline on window close/unload
                 window.addEventListener('beforeunload', async () => {
                     await setDoc(doc(db, "users", user.uid), { isOnline: false, lastSeen: serverTimestamp() }, { merge: true });
                 });
@@ -96,9 +96,7 @@
                 document.getElementById('current-username').innerText = user.displayName;
                 if(user.photoURL) document.getElementById('nav-profile-img').src = user.photoURL;
 
-                // Keep online status active
                 setDoc(doc(db, "users", user.uid), { isOnline: true, lastSeen: serverTimestamp() }, { merge: true });
-
                 loadEverything();
             } else {
                 loginScreen.style.display = 'flex';
@@ -195,7 +193,6 @@
             });
         }
 
-        // Custom Beautiful Alert Modal for Group Creation
         window.openCreateGroupModal = function() {
             document.getElementById('custom-alert-input').value = '';
             document.getElementById('custom-alert-modal').classList.remove('hidden');
@@ -220,14 +217,13 @@
             await setDoc(doc(db, "groups", gId), {
                 id: gId,
                 name: gName,
-                description: "Welcome to our WhatsApp style group!",
+                description: "Welcome to our study group!",
                 createdBy: currentUser.uid,
                 members: [currentUser.uid],
                 inviteCode: inviteCode,
                 createdAt: serverTimestamp()
             });
             
-            // Success Custom Notification
             showToast("Group එක සාර්ථකව සාදන ලදී! 🎉");
         }
 
@@ -258,7 +254,6 @@
             if(type === 'user') {
                 chatId = [currentUser.uid, id].sort().join("_");
                 
-                // Track target user online status and last seen in real-time
                 unsubUserStatus = onSnapshot(doc(db, "users", id), (docSnap) => {
                     if(docSnap.exists()) {
                         const uData = docSnap.data();
@@ -300,6 +295,75 @@
             selectChat(`saved_${currentUser.uid}`, "Saved Messages", "https://cdn-icons-png.flaticon.com/512/906/906334.png", "saved");
         }
 
+        // CLEAR CHAT FEATURE (Clear entire chat history for user)
+        window.openClearChatModal = function() {
+            document.getElementById('clear-chat-modal').classList.remove('hidden');
+        }
+
+        window.closeClearChatModal = function() {
+            document.getElementById('clear-chat-modal').classList.add('hidden');
+        }
+
+        window.confirmClearChat = async function() {
+            closeClearChatModal();
+            let colPath = `chats/${activeChat.id}/messages`;
+            if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
+            if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
+            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
+
+            const querySnapshot = await getDocs(collection(db, colPath));
+            const batchDeletes = [];
+            querySnapshot.forEach((docSnap) => {
+                batchDeletes.push(deleteDoc(doc(db, colPath, docSnap.id)));
+            });
+            await Promise.all(batchDeletes);
+            showToast("චැට් ඉතිහාසය සම්පූර්ණයෙන්ම ඉවත් කරන ලදී (Clear Chat)");
+        }
+
+        // DELETE OPTIONS MODAL (Delete for Me vs Delete for Everyone)
+        let selectedMsgForDelete = null;
+        window.openDeleteOptionsModal = function(msgId) {
+            selectedMsgForDelete = msgId;
+            document.getElementById('delete-options-modal').classList.remove('hidden');
+        }
+
+        window.closeDeleteOptionsModal = function() {
+            document.getElementById('delete-options-modal').classList.add('hidden');
+            selectedMsgForDelete = null;
+        }
+
+        window.deleteMessageForMe = async function() {
+            if(!selectedMsgForDelete) return;
+            const msgId = selectedMsgForDelete;
+            closeDeleteOptionsModal();
+
+            let colPath = `chats/${activeChat.id}/messages`;
+            if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
+            if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
+            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
+
+            // Mark message as deleted for this specific user or hide via array field
+            await updateDoc(doc(db, colPath, msgId), {
+                [`deletedFor.${currentUser.uid}`]: true
+            });
+            showToast("පණිවිඩය ඔබට නොපෙනෙන ලෙස ඉවත් කරන ලදී.");
+        }
+
+        window.deleteMessageForEveryone = async function() {
+            if(!selectedMsgForDelete) return;
+            const msgId = selectedMsgForDelete;
+            closeDeleteOptionsModal();
+
+            let colPath = `chats/${activeChat.id}/messages`;
+            if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
+            if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
+            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
+
+            // Permanently delete from database so nobody can see it
+            await deleteDoc(doc(db, colPath, msgId));
+            showToast("පණිවිඩය දෙපාර්ශ්වයටම නොපෙනෙන ලෙස සම්පූර්ණයෙන්ම මැකී ගියේය!");
+        }
+
         window.openGroupInfo = async function() {
             if(activeChat.type !== 'group') return;
             const docRef = doc(db, "groups", activeChat.id);
@@ -328,7 +392,6 @@
                 </div>`;
             }
             document.getElementById('group-members-list').innerHTML = membersHtml;
-
             document.getElementById('group-info-modal').classList.remove('hidden');
         }
 
@@ -393,6 +456,7 @@
                     isPinned: false,
                     replyTo: replyingTo ? replyingTo : null,
                     reactions: {},
+                    deletedFor: {},
                     timestamp: serverTimestamp()
                 });
                 if(customText === null) input.value = '';
@@ -433,15 +497,6 @@
             }
         }
 
-        window.deleteMessage = async function(msgId) {
-            if(!confirm("මෙම පණිවිඩය මකා දමන්න අවශ්‍යද?")) return;
-            let colPath = `chats/${activeChat.id}/messages`;
-            if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
-            if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
-            if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
-            await deleteDoc(doc(db, colPath, msgId));
-        }
-
         window.togglePinMessage = async function(msgId, currentPinState) {
             let colPath = `chats/${activeChat.id}/messages`;
             if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
@@ -478,6 +533,8 @@
             const container = document.getElementById('messages-container');
             const pinnedContainer = document.getElementById('pinned-banner');
             
+            if(unsubMessages) { unsubMessages(); }
+
             let colPath = `chats/${activeChat.id}/messages`;
             if(activeChat.type === 'group') colPath = `groups/${activeChat.id}/messages`;
             if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
@@ -485,7 +542,7 @@
 
             const q = query(collection(db, colPath), orderBy("timestamp", "asc"));
 
-            onSnapshot(q, (snapshot) => {
+            unsubMessages = onSnapshot(q, (snapshot) => {
                 container.innerHTML = '';
                 pinnedContainer.classList.add('hidden');
 
@@ -493,6 +550,10 @@
                 let isMe = false;
                 snapshot.forEach((docSnap) => {
                     const msg = docSnap.data();
+                    
+                    // If message is deleted for current user, skip rendering it completely
+                    if(msg.deletedFor && msg.deletedFor[currentUser.uid]) return;
+
                     lastMsgId = docSnap.id;
                     isMe = msg.senderId === currentUser.uid;
                     const time = msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Now';
@@ -539,7 +600,7 @@
                                     <button onclick="addReaction('${docSnap.id}', '❤️')" title="Love"><i class="fa-solid fa-heart text-xs text-rose-500 hover:scale-125 transition"></i></button>
                                     <button onclick="addReaction('${docSnap.id}', '🔥')" title="Fire"><i class="fa-solid fa-fire text-xs text-amber-500 hover:scale-125 transition"></i></button>
                                     <button onclick="togglePinMessage('${docSnap.id}', ${msg.isPinned})" title="Pin"><i class="fa-solid fa-thumbtack text-xs text-yellow-400 hover:scale-125 transition"></i></button>
-                                    ${isMe ? `<button onclick="deleteMessage('${docSnap.id}')" title="Delete"><i class="fa-solid fa-trash text-xs text-rose-500 hover:scale-125 transition"></i></button>` : ''}
+                                    <button onclick="openDeleteOptionsModal('${docSnap.id}')" title="Delete"><i class="fa-solid fa-trash text-xs text-rose-500 hover:scale-125 transition"></i></button>
                                 </div>
                             </div>
                         </div>
@@ -563,7 +624,7 @@
             document.documentElement.style.setProperty('--my-msg-bg', myMsgBg);
             document.documentElement.style.setProperty('--other-msg-bg', otherMsgBg);
             localStorage.setItem('chat_theme', JSON.stringify({ primaryColor, myMsgBg, otherMsgBg }));
-            showToast("തීම් වෙනස් කරන ලදී!");
+            showToast("තීම් වෙනස් කරන ලදී!");
         }
 
         window.loadSavedPreferences = function() {
@@ -665,15 +726,21 @@
 
             <div id="active-chat-box" class="hidden flex-col h-full w-full">
                 <!-- Chat Header -->
-                <div onclick="openGroupInfo()" class="bg-slate-950/80 px-6 py-4 flex justify-between items-center border-b border-slate-800/80 z-10 shadow-lg backdrop-blur-xl cursor-pointer hover:bg-slate-900/50 transition">
-                    <div class="flex items-center space-x-4">
+                <div class="bg-slate-950/80 px-6 py-4 flex justify-between items-center border-b border-slate-800/80 z-10 shadow-lg backdrop-blur-xl">
+                    <div onclick="openGroupInfo()" class="flex items-center space-x-4 cursor-pointer hover:opacity-80 transition">
                         <img id="header-chat-img" src="" class="rounded-2xl w-12 h-12 object-cover border-2 border-[var(--theme-color)] shadow-md">
                         <div>
                             <h2 id="header-chat-name" class="font-bold text-white text-base"></h2>
                             <span id="header-chat-status" class="text-xs text-slate-400 font-medium">Click for info</span>
                         </div>
                     </div>
-                    <div><i class="fa-solid fa-ellipsis-vertical text-slate-400 text-lg px-2"></i></div>
+                    <div class="flex items-center space-x-3">
+                        <!-- Clear Chat Button -->
+                        <button onclick="openClearChatModal()" class="bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 px-3 py-2 rounded-xl text-xs font-bold border border-rose-500/20 transition flex items-center space-x-1.5" title="Clear Chat History">
+                            <i class="fa-solid fa-eraser"></i>
+                            <span class="hidden sm:inline">Clear Chat</span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Pinned Message Banner -->
@@ -725,7 +792,7 @@
         </div>
     </div>
 
-    <!-- CUSTOM BEAUTIFUL ALERT MODAL (Replaces Browser Prompt) -->
+    <!-- CUSTOM ALERT MODAL FOR GROUP CREATION -->
     <div id="custom-alert-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
         <div class="bg-slate-950 border border-slate-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in duration-200">
             <div class="flex items-center space-x-3 text-[var(--theme-color)]">
@@ -746,6 +813,49 @@
             <div class="flex space-x-3 pt-2">
                 <button onclick="closeCreateGroupModal()" class="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-300 py-3 rounded-2xl text-xs font-bold border border-slate-800 transition">Cancel</button>
                 <button onclick="confirmCreateGroup()" class="flex-1 bg-[var(--theme-color)] hover:opacity-95 text-white py-3 rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/20 transition">Create Group</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CLEAR CHAT CONFIRMATION MODAL -->
+    <div id="clear-chat-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+        <div class="bg-slate-950 border border-slate-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-5 text-center">
+            <div class="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-3xl mx-auto flex items-center justify-center text-2xl">
+                <i class="fa-solid fa-eraser"></i>
+            </div>
+            <div>
+                <h3 class="text-base font-bold text-white">Clear Chat History?</h3>
+                <p class="text-xs text-slate-400 mt-1">මෙම සංවාදයේ සියලුම පණිවිඩ ඉවත් කිරීමට අවශ්‍ය බව තහවුරු කරන්න.</p>
+            </div>
+            <div class="flex space-x-3 pt-2">
+                <button onclick="closeClearChatModal()" class="flex-1 bg-slate-900 text-slate-300 py-3 rounded-2xl text-xs font-bold border border-slate-800">Cancel</button>
+                <button onclick="confirmClearChat()" class="flex-1 bg-rose-600 hover:bg-rose-500 text-white py-3 rounded-2xl text-xs font-bold shadow-lg">Clear All</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DELETE OPTIONS MODAL (Delete for Me vs Delete for Everyone) -->
+    <div id="delete-options-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+        <div class="bg-slate-950 border border-slate-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 class="text-sm font-bold text-white">Delete Message</h3>
+                <button onclick="closeDeleteOptionsModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="space-y-2 pt-1">
+                <button onclick="deleteMessageForMe()" class="w-full bg-slate-900 hover:bg-slate-800 text-slate-200 py-3 px-4 rounded-2xl text-xs font-bold text-left flex items-center space-x-3 border border-slate-800 transition">
+                    <i class="fa-solid fa-user-slash text-amber-400"></i>
+                    <div>
+                        <p>Delete for me</p>
+                        <p class="text-[10px] text-slate-400 font-normal">මෙම පණිවිඩය ඔබට පමණක් නොපෙනී යයි</p>
+                    </div>
+                </button>
+                <button onclick="deleteMessageForEveryone()" class="w-full bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 py-3 px-4 rounded-2xl text-xs font-bold text-left flex items-center space-x-3 border border-rose-500/20 transition">
+                    <i class="fa-solid fa-trash-can text-rose-500"></i>
+                    <div>
+                        <p>Delete for everyone (Permanently)</p>
+                        <p class="text-[10px] text-slate-400 font-normal">දෙපාර්ශ්වයටම / හැමෝටම සම්පූර්ණයෙන්ම මැකී යයි</p>
+                    </div>
+                </button>
             </div>
         </div>
     </div>
