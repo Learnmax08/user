@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Chat Hub - Clear Chat & Delete for Everyone</title>
+    <title>Super Chat Hub - Advanced Settings & Customization</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -54,7 +54,8 @@
         let unsubUserStatus = null;
         let unsubMessages = null;
 
-        const notifSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
+        // Notification sound configuration variables
+        let notifSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
         let notifEnabled = true;
         let notifVolume = 0.5;
 
@@ -295,7 +296,7 @@
             selectChat(`saved_${currentUser.uid}`, "Saved Messages", "https://cdn-icons-png.flaticon.com/512/906/906334.png", "saved");
         }
 
-        // CLEAR CHAT FEATURE (Clear entire chat history for user)
+        // CLEAR CHAT FEATURE
         window.openClearChatModal = function() {
             document.getElementById('clear-chat-modal').classList.remove('hidden');
         }
@@ -320,7 +321,7 @@
             showToast("චැට් ඉතිහාසය සම්පූර්ණයෙන්ම ඉවත් කරන ලදී (Clear Chat)");
         }
 
-        // DELETE OPTIONS MODAL (Delete for Me vs Delete for Everyone)
+        // DELETE OPTIONS MODAL
         let selectedMsgForDelete = null;
         window.openDeleteOptionsModal = function(msgId) {
             selectedMsgForDelete = msgId;
@@ -342,7 +343,6 @@
             if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
             if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
 
-            // Mark message as deleted for this specific user or hide via array field
             await updateDoc(doc(db, colPath, msgId), {
                 [`deletedFor.${currentUser.uid}`]: true
             });
@@ -359,7 +359,6 @@
             if(activeChat.type === 'channel') colPath = `channels/${activeChat.id}/messages`;
             if(activeChat.type === 'saved') colPath = `saved_messages/${currentUser.uid}/messages`;
 
-            // Permanently delete from database so nobody can see it
             await deleteDoc(doc(db, colPath, msgId));
             showToast("පණිවිඩය දෙපාර්ශ්වයටම නොපෙනෙන ලෙස සම්පූර්ණයෙන්ම මැකී ගියේය!");
         }
@@ -551,7 +550,6 @@
                 snapshot.forEach((docSnap) => {
                     const msg = docSnap.data();
                     
-                    // If message is deleted for current user, skip rendering it completely
                     if(msg.deletedFor && msg.deletedFor[currentUser.uid]) return;
 
                     lastMsgId = docSnap.id;
@@ -619,12 +617,38 @@
         window.addEmoji = (em) => { document.getElementById('msg-input').value += em; toggleEmojiPicker(); }
 
         window.toggleSettingsModal = () => document.getElementById('settings-modal').classList.toggle('hidden');
+        
+        // 1. Theme Color / Chat Theme Customizer
         window.changeThemeColor = function(primaryColor, myMsgBg, otherMsgBg) {
             document.documentElement.style.setProperty('--theme-color', primaryColor);
             document.documentElement.style.setProperty('--my-msg-bg', myMsgBg);
             document.documentElement.style.setProperty('--other-msg-bg', otherMsgBg);
             localStorage.setItem('chat_theme', JSON.stringify({ primaryColor, myMsgBg, otherMsgBg }));
-            showToast("තීම් වෙනස් කරන ලදී!");
+            showToast("චැට් තීම් වෙනස් කරන ලදී!");
+        }
+
+        // 2. Chat Background Customizer (Wallpaper Pattern)
+        window.changeChatBackground = function(bgStyle) {
+            const chatArea = document.getElementById('chat-display-area');
+            if(!chatArea) return;
+            chatArea.className = `hidden md:flex flex-col flex-1 relative h-full ${bgStyle}`;
+            localStorage.setItem('chat_bg_style', bgStyle);
+            showToast("චැට් පසුබිම වෙනස් කරන ලදී!");
+        }
+
+        // 3. Notification Sound Controls (Volume & Sound Selection)
+        window.updateVolume = function(val) {
+            notifVolume = parseFloat(val);
+            document.getElementById('vol-val').innerText = Math.round(notifVolume * 100) + '%';
+            localStorage.setItem('notif_volume', notifVolume);
+        }
+
+        window.changeNotifSound = function(soundUrl) {
+            notifSound = new Audio(soundUrl);
+            notifSound.volume = notifVolume;
+            notifSound.play().catch(e => {});
+            localStorage.setItem('notif_sound_url', soundUrl);
+            showToast("නෝටිෆිකේෂන් නාදය වෙනස් කරන ලදී!");
         }
 
         window.loadSavedPreferences = function() {
@@ -634,6 +658,28 @@
                 document.documentElement.style.setProperty('--theme-color', t.primaryColor);
                 document.documentElement.style.setProperty('--my-msg-bg', t.myMsgBg);
                 document.documentElement.style.setProperty('--other-msg-bg', t.otherMsgBg);
+            }
+
+            const savedBg = localStorage.getItem('chat_bg_style');
+            if(savedBg) {
+                const chatArea = document.getElementById('chat-display-area');
+                if(chatArea) chatArea.className = `hidden md:flex flex-col flex-1 relative h-full ${savedBg}`;
+            }
+
+            const savedVol = localStorage.getItem('notif_volume');
+            if(savedVol !== null) {
+                notifVolume = parseFloat(savedVol);
+                const slider = document.getElementById('notif-vol-slider');
+                if(slider) slider.value = notifVolume;
+                const volVal = document.getElementById('vol-val');
+                if(volVal) volVal.innerText = Math.round(notifVolume * 100) + '%';
+            }
+
+            const savedSoundUrl = localStorage.getItem('notif_sound_url');
+            if(savedSoundUrl) {
+                notifSound = new Audio(savedSoundUrl);
+                const selectEl = document.getElementById('notif-sound-select');
+                if(selectEl) selectEl.value = savedSoundUrl;
             }
         }
         window.addEventListener('DOMContentLoaded', () => loadSavedPreferences());
@@ -647,7 +693,9 @@
         }
         ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        .tg-wallpaper { background-color: #030712; background-image: radial-gradient(rgba(37, 99, 235, 0.08) 1px, transparent 1px); background-size: 28px 28px; }
+        .bg-dots { background-color: #030712; background-image: radial-gradient(rgba(37, 99, 235, 0.08) 1px, transparent 1px); background-size: 28px 28px; }
+        .bg-solid-dark { background-color: #0b0f19; }
+        .bg-gradient-mesh { background: linear-gradient(135deg, #030712 0%, #111827 50%, #1e1b4b 100%); }
     </style>
 </head>
 <body class="bg-[#030712] h-screen w-screen overflow-hidden flex items-center justify-center p-0 md:p-3 text-slate-100 font-sans">
@@ -715,7 +763,7 @@
         </div>
 
         <!-- CHAT AREA -->
-        <div class="hidden md:flex flex-col flex-1 tg-wallpaper relative h-full">
+        <div id="chat-display-area" class="hidden md:flex flex-col flex-1 bg-dots relative h-full">
             <div id="chat-placeholder" class="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-400">
                 <div class="w-24 h-24 bg-slate-900/60 rounded-3xl flex items-center justify-center mb-4 border border-slate-800 shadow-xl backdrop-blur-md">
                     <i class="fa-solid fa-paper-plane text-4xl text-[var(--theme-color)]"></i>
@@ -735,7 +783,6 @@
                         </div>
                     </div>
                     <div class="flex items-center space-x-3">
-                        <!-- Clear Chat Button -->
                         <button onclick="openClearChatModal()" class="bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 px-3 py-2 rounded-xl text-xs font-bold border border-rose-500/20 transition flex items-center space-x-1.5" title="Clear Chat History">
                             <i class="fa-solid fa-eraser"></i>
                             <span class="hidden sm:inline">Clear Chat</span>
@@ -794,7 +841,7 @@
 
     <!-- CUSTOM ALERT MODAL FOR GROUP CREATION -->
     <div id="custom-alert-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
-        <div class="bg-slate-950 border border-slate-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in duration-200">
+        <div class="bg-slate-950 border border-slate-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-5">
             <div class="flex items-center space-x-3 text-[var(--theme-color)]">
                 <div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-xl">
                     <i class="fa-solid fa-users-rectangle"></i>
@@ -834,7 +881,7 @@
         </div>
     </div>
 
-    <!-- DELETE OPTIONS MODAL (Delete for Me vs Delete for Everyone) -->
+    <!-- DELETE OPTIONS MODAL -->
     <div id="delete-options-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
         <div class="bg-slate-950 border border-slate-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4">
             <div class="flex justify-between items-center border-b border-slate-800 pb-3">
@@ -901,23 +948,64 @@
         </div>
     </div>
 
-    <!-- SETTINGS MODAL -->
+    <!-- SETTINGS MODAL WITH SUB-CATEGORIES -->
     <div id="settings-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
-        <div class="bg-slate-950 border border-slate-800 w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-5">
+        <div class="bg-slate-950 border border-slate-800 w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-6 max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center border-b border-slate-800 pb-3">
-                <h2 class="text-base font-bold text-white">Theme Customizer</h2>
+                <h2 class="text-lg font-bold text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-gear text-[var(--theme-color)]"></i>
+                    <span>Settings & Customization</span>
+                </h2>
                 <button onclick="toggleSettingsModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
-            <div class="grid grid-cols-2 gap-3">
-                <button onclick="changeThemeColor('#2563eb', '#1d4ed8', '#1e293b')" class="p-3.5 rounded-2xl bg-slate-900 flex items-center space-x-3 text-left border border-slate-800">
-                    <span class="w-5 h-5 rounded-full bg-blue-600 block"></span>
-                    <span class="text-xs font-bold text-white">Telegram Blue</span>
-                </button>
-                <button onclick="changeThemeColor('#059669', '#047857', '#1e293b')" class="p-3.5 rounded-2xl bg-slate-900 flex items-center space-x-3 text-left border border-slate-800">
-                    <span class="w-5 h-5 rounded-full bg-emerald-600 block"></span>
-                    <span class="text-xs font-bold text-white">WhatsApp Green</span>
-                </button>
+
+            <!-- Sub-Category 1: Theme & App Color -->
+            <div class="space-y-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800/80">
+                <h3 class="text-xs font-bold text-[var(--theme-color)] uppercase tracking-wider"><i class="fa-solid fa-palette mr-1.5"></i> 1. Chat & Theme Color</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="changeThemeColor('#2563eb', '#1d4ed8', '#1e293b')" class="p-3 rounded-2xl bg-slate-900 flex items-center space-x-3 text-left border border-slate-800 hover:border-slate-700 transition">
+                        <span class="w-5 h-5 rounded-full bg-blue-600 block shadow"></span>
+                        <span class="text-xs font-bold text-white">Telegram Blue</span>
+                    </button>
+                    <button onclick="changeThemeColor('#059669', '#047857', '#1e293b')" class="p-3 rounded-2xl bg-slate-900 flex items-center space-x-3 text-left border border-slate-800 hover:border-slate-700 transition">
+                        <span class="w-5 h-5 rounded-full bg-emerald-600 block shadow"></span>
+                        <span class="text-xs font-bold text-white">WhatsApp Green</span>
+                    </button>
+                </div>
             </div>
+
+            <!-- Sub-Category 2: Chat Background / Wallpaper -->
+            <div class="space-y-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800/80">
+                <h3 class="text-xs font-bold text-[var(--theme-color)] uppercase tracking-wider"><i class="fa-solid fa-image mr-1.5"></i> 2. Chat Background Wallpaper</h3>
+                <div class="grid grid-cols-3 gap-2.5">
+                    <button onclick="changeChatBackground('bg-dots')" class="p-2.5 rounded-xl bg-slate-900 text-xs font-bold text-slate-200 border border-slate-800 hover:border-slate-600 transition text-center">Dots Pattern</button>
+                    <button onclick="changeChatBackground('bg-solid-dark')" class="p-2.5 rounded-xl bg-slate-900 text-xs font-bold text-slate-200 border border-slate-800 hover:border-slate-600 transition text-center">Solid Dark</button>
+                    <button onclick="changeChatBackground('bg-gradient-mesh')" class="p-2.5 rounded-xl bg-slate-900 text-xs font-bold text-slate-200 border border-slate-800 hover:border-slate-600 transition text-center">Gradient Mesh</button>
+                </div>
+            </div>
+
+            <!-- Sub-Category 3: Notification Volume & Sound Customization -->
+            <div class="space-y-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800/80">
+                <h3 class="text-xs font-bold text-[var(--theme-color)] uppercase tracking-wider"><i class="fa-solid fa-bell mr-1.5"></i> 3. Notification Sound & Volume</h3>
+                
+                <div class="space-y-1.5">
+                    <div class="flex justify-between text-xs text-slate-300 font-medium">
+                        <span>Notification Volume</span>
+                        <span id="vol-val" class="font-bold text-[var(--theme-color)]">50%</span>
+                    </div>
+                    <input type="range" id="notif-vol-slider" min="0" max="1" step="0.05" value="0.5" oninput="updateVolume(this.value)" class="w-full accent-[var(--theme-color)] cursor-pointer">
+                </div>
+
+                <div class="space-y-1.5 pt-2">
+                    <label class="text-xs text-slate-300 font-medium block">Notification Sound Style</label>
+                    <select id="notif-sound-select" onchange="changeNotifSound(this.value)" class="w-full bg-slate-900 text-white text-xs px-3 py-2.5 rounded-xl border border-slate-800 outline-none focus:border-[var(--theme-color)]">
+                        <option value="https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3">Classic Pop (Default)</option>
+                        <option value="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3">Digital Beep</option>
+                        <option value="https://assets.mixkit.co/active_storage/sfx/2357/2357-preview.mp3">Soft Chime</option>
+                    </select>
+                </div>
+            </div>
+
         </div>
     </div>
 </body>
